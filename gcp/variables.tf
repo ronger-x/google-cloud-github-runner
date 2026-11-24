@@ -60,6 +60,25 @@ variable "zone" {
   }
 }
 
+variable "allowed_repositories" {
+  description = "Comma-separated owner/repo names allowed to start runners; blank allows every repository the GitHub App is installed on"
+  type        = string
+  default     = ""
+  nullable    = false
+}
+
+variable "runner_scope" {
+  description = "Where runners register: 'repository' registers on the job's repository, blank keeps the upstream behaviour (organization when available)"
+  type        = string
+  default     = ""
+  nullable    = false
+
+  validation {
+    condition     = contains(["", "repository"], var.runner_scope)
+    error_message = "runner_scope must be blank or 'repository'."
+  }
+}
+
 variable "github_runner_group" {
   description = "GitHub Actions runner group name passed to the Cloud Run service; blank disables --runnergroup"
   type        = string

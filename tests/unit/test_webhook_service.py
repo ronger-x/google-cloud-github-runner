@@ -430,3 +430,88 @@ class TestWebhookServiceDeliveryIdLogging:
         mock_gh_client.get_registration_token.assert_called_once_with(
             repo_name="owner/repo", delivery_id="fwd-gh-001"
         )
+
+
+class TestRodakRepositoryRestrictions:
+    """ALLOWED_REPOSITORIES and RUNNER_SCOPE=repository."""
+
+    @staticmethod
+    def _org_payload(full_name='rymcu/rodak'):
+        owner = full_name.split('/')[0]
+        return {
+            'action': 'queued',
+            'workflow_job': {'labels': ['gcp-rodak-linux']},
+            'organization': {'login': owner},
+            'repository': {
+                'html_url': f'https://github.com/{full_name}',
+                'full_name': full_name,
+                'owner': {'html_url': f'https://github.com/{owner}'}
+            }
+        }
+
+    @patch('app.services.webhook_service.GCloudClient')
+    @patch('app.services.webhook_service.GitHubClient')
+    def test_repository_not_allowed_is_ignored(self, mock_gh_client_class, mock_gc_client_class, monkeypatch):
+        monkeypatch.setenv('ALLOWED_REPOSITORIES', 'rymcu/rodak')
+        mock_gh_client = Mock()
+        mock_gh_client_class.return_value = mock_gh_client
+        mock_gc_client = Mock()
+        mock_gc_client_class.return_value = mock_gc_client
+
+        result = WebhookService().handle_workflow_job(self._org_payload('rymcu/other'), delivery_id='d-1')
+
+        assert result == {'action': 'ignored', 'runner_name': None}
+        mock_gh_client.get_registration_token.assert_not_called()
+        mock_gc_client.create_runner_instance.assert_not_called()
+
+    @patch('app.services.webhook_service.GCloudClient')
+    @patch('app.services.webhook_service.GitHubClient')
+    def test_allowed_repository_match_is_case_insensitive(self, mock_gh_client_class, mock_gc_client_class, monkeypatch):
+        monkeypatch.setenv('ALLOWED_REPOSITORIES', ' RYMCU/Rodak , ')
+        mock_gh_client = Mock()
+        mock_gh_client.get_registration_token.return_value = 'tok'
+        mock_gh_client_class.return_value = mock_gh_client
+        mock_gc_client = Mock()
+        mock_gc_client.create_runner_instance.return_value = 'gcp-runner-1'
+        mock_gc_client_class.return_value = mock_gc_client
+
+        result = WebhookService().handle_workflow_job(self._org_payload('rymcu/rodak'), delivery_id='d-2')
+
+        assert result == {'action': 'created', 'runner_name': 'gcp-runner-1'}
+
+    @patch('app.services.webhook_service.GCloudClient')
+    @patch('app.services.webhook_service.GitHubClient')
+    def test_repository_scope_registers_on_repository_for_org_repo(
+        self, mock_gh_client_class, mock_gc_client_class, monkeypatch
+    ):
+        monkeypatch.setenv('RUNNER_SCOPE', 'repository')
+        mock_gh_client = Mock()
+        mock_gh_client.get_registration_token.return_value = 'repo-token'
+        mock_gh_client_class.return_value = mock_gh_client
+        mock_gc_client = Mock()
+        mock_gc_client.create_runner_instance.return_value = 'gcp-runner-2'
+        mock_gc_client_class.return_value = mock_gc_client
+
+        WebhookService().handle_workflow_job(self._org_payload('rymcu/rodak'), delivery_id='d-3')
+
+        mock_gh_client.get_registration_token.assert_called_once_with(repo_name='rymcu/rodak', delivery_id='d-3')
+        mock_gc_client.create_runner_instance.assert_called_once_with(
+            'repo-token', 'https://github.com/rymcu/rodak', 'gcp-rodak-linux', 'rymcu/rodak', delivery_id='d-3'
+        )
+
+    @patch('app.services.webhook_service.GCloudClient')
+    @patch('app.services.webhook_service.GitHubClient')
+    def test_completed_events_are_not_filtered(self, mock_gh_client_class, mock_gc_client_class, monkeypatch):
+        """Cleanup must still delete runners, whatever the allowlist says."""
+        monkeypatch.setenv('ALLOWED_REPOSITORIES', 'rymcu/rodak')
+        mock_gh_client_class.return_value = Mock()
+        mock_gc_client = Mock()
+        mock_gc_client_class.return_value = mock_gc_client
+        payload = self._org_payload('rymcu/other')
+        payload['action'] = 'completed'
+        payload['workflow_job'] = {'runner_name': 'gcp-runner-abc'}
+
+        result = WebhookService().handle_workflow_job(payload, delivery_id='d-4')
+
+        assert result == {'action': 'deleted', 'runner_name': 'gcp-runner-abc'}
+        mock_gc_client.delete_runner_instance.assert_called_once_with('gcp-runner-abc', delivery_id='d-4')

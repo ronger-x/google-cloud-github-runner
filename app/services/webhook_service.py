@@ -2,10 +2,19 @@
 Service for processing webhook events.
 """
 import logging
+import os
 import re
 from app.clients import GitHubClient, GCloudClient
 
 logger = logging.getLogger(__name__)
+
+
+def parse_allowed_repositories(value):
+    """Parse a comma-separated list of owner/repo names into a lowercase set.
+
+    An empty value means no restriction (upstream behaviour).
+    """
+    return {item.strip().lower() for item in (value or '').split(',') if item.strip()}
 
 
 class WebhookService:
@@ -15,6 +24,11 @@ class WebhookService:
         """Initialize WebhookService with API clients."""
         self.github_client = GitHubClient()
         self.gcloud_client = GCloudClient()
+        # Only these repositories may start runners. Empty: every repository the App sees.
+        self.allowed_repositories = parse_allowed_repositories(os.environ.get('ALLOWED_REPOSITORIES'))
+        # Register runners on the repository instead of the organization, so other
+        # repositories of the organization cannot pick up the runner.
+        self.repository_scoped_runners = os.environ.get('RUNNER_SCOPE', '').strip().lower() == 'repository'
 
     def _validate_payload(self, payload):
         """Validate webhook payload structure and content."""
@@ -67,6 +81,14 @@ class WebhookService:
         )
 
         # https://docs.github.com/en/webhooks/webhook-events-and-payloads?actionType=queued#workflow_job
+        if action == 'queued' and self.allowed_repositories and (repo_name or '').lower() not in self.allowed_repositories:
+            logger.warning(
+                "Repository %s is not in ALLOWED_REPOSITORIES. Ignoring job. delivery_id: %s",
+                repo_name,
+                delivery_id,
+            )
+            return {'action': 'ignored', 'runner_name': None}
+
         if action == 'queued':
             template_name = None
             if labels:
@@ -122,6 +144,14 @@ class WebhookService:
             str or None: The name of the created runner instance.
         """
         try:
+            # Repository scope: register the runner on the repository even for organization repositories
+            if self.repository_scoped_runners and repo_name:
+                token = self.github_client.get_registration_token(
+                    repo_name=repo_name, delivery_id=delivery_id
+                )
+                return self.gcloud_client.create_runner_instance(
+                    token, repo_url, template_name, repo_name, delivery_id=delivery_id
+                )
             # Get registration token
             if org_name:
                 # Create GitHub Actions runner instance for organization
