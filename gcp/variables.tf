@@ -79,6 +79,14 @@ variable "runner_scope" {
   }
 }
 
+variable "setup_password" {
+  description = "HTTP Basic Auth password for /setup/; blank keeps the app default (the project ID, which is not secret)"
+  type        = string
+  default     = ""
+  nullable    = false
+  sensitive   = true
+}
+
 variable "github_runner_group" {
   description = "GitHub Actions runner group name passed to the Cloud Run service; blank disables --runnergroup"
   type        = string

@@ -28,13 +28,17 @@ module "cloud_run_github_runners_manager" {
         }
         startup_cpu_boost = false # We do not scale to zero.
       }
-      env = {
-        GOOGLE_CLOUD_PROJECT = var.project_id
-        GOOGLE_CLOUD_ZONE    = "${var.region}-${var.zone}"
-        GITHUB_RUNNER_GROUP  = var.github_runner_group
-        ALLOWED_REPOSITORIES = var.allowed_repositories
-        RUNNER_SCOPE         = var.runner_scope
-      }
+      env = merge(
+        {
+          GOOGLE_CLOUD_PROJECT = var.project_id
+          GOOGLE_CLOUD_ZONE    = "${var.region}-${var.zone}"
+          GITHUB_RUNNER_GROUP  = var.github_runner_group
+          ALLOWED_REPOSITORIES = var.allowed_repositories
+          RUNNER_SCOPE         = var.runner_scope
+        },
+        # Only set when given: the app falls back to the project ID, which is not secret
+        var.setup_password == "" ? {} : { SETUP_PASSWORD = var.setup_password }
+      )
       env_from_key = {
         GITHUB_APP_ID = {
           # Secret may only be {secret} or
