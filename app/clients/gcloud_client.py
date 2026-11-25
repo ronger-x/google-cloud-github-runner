@@ -170,6 +170,23 @@ class GCloudClient:
             )
             raise
 
+    def list_runner_instances(self):
+        """Return the runner VMs of this zone as dicts with 'name', 'status' and 'created' (RFC 3339)."""
+        request = compute_v1.ListInstancesRequest(
+            project=self.project_id,
+            zone=self.zone,
+            filter='name eq "gcp-runner-.*"',
+        )
+        return [
+            {
+                'name': instance.name,
+                'status': instance.status,
+                'created': instance.creation_timestamp,
+                'repo': (instance.labels or {}).get('gha-repo'),
+            }
+            for instance in self.instance_client.list(request=request)
+        ]
+
     def delete_runner_instance(self, instance_name, delivery_id=None):
         """
         Delete a GCE instance.

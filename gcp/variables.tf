@@ -87,6 +87,33 @@ variable "setup_password" {
   sensitive   = true
 }
 
+variable "reconcile_token" {
+  description = "Shared token for POST /reconcile; blank disables the endpoint and the Cloud Scheduler job"
+  type        = string
+  default     = ""
+  nullable    = false
+  sensitive   = true
+}
+
+variable "reconcile_schedule" {
+  description = "Cron schedule (UTC) for the reconcile job that retries stranded queued jobs and deletes orphaned runner VMs"
+  type        = string
+  default     = "*/3 * * * *"
+  nullable    = false
+}
+
+variable "orphan_grace_seconds" {
+  description = "Age after which a runner VM that never registered with GitHub is deleted by reconcile"
+  type        = number
+  default     = 600
+  nullable    = false
+
+  validation {
+    condition     = var.orphan_grace_seconds >= 180
+    error_message = "orphan_grace_seconds must be at least 180, a VM needs time to boot and register."
+  }
+}
+
 variable "github_runner_group" {
   description = "GitHub Actions runner group name passed to the Cloud Run service; blank disables --runnergroup"
   type        = string

@@ -110,3 +110,48 @@ class GitHubClient:
         response = requests.post(url, headers=headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         return response.json()['token']
+
+    def _api_headers(self):
+        return {
+            'Authorization': f'Bearer {self.get_installation_access_token()}',
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28'
+        }
+
+    def list_queued_jobs(self, repo_name):
+        """Return queued workflow jobs of a repository as dicts with 'id' and 'labels'.
+
+        Used by reconcile to retry jobs whose runner VM could not be created
+        (for example because of a quota error): GitHub does not resend the webhook.
+        """
+        headers = self._api_headers()
+        runs_url = f"https://api.github.com/repos/{repo_name}/actions/runs"
+        jobs = []
+        for status in ('queued', 'in_progress'):
+            response = requests.get(
+                runs_url, headers=headers, params={'status': status, 'per_page': 50}, timeout=REQUEST_TIMEOUT
+            )
+            response.raise_for_status()
+            for run in response.json().get('workflow_runs', []):
+                jobs_response = requests.get(
+                    f"{runs_url}/{run['id']}/jobs",
+                    headers=headers,
+                    params={'filter': 'latest', 'per_page': 100},
+                    timeout=REQUEST_TIMEOUT,
+                )
+                jobs_response.raise_for_status()
+                for job in jobs_response.json().get('jobs', []):
+                    if job.get('status') == 'queued':
+                        jobs.append({'id': job.get('id'), 'labels': job.get('labels') or []})
+        return jobs
+
+    def list_runner_names(self, repo_name):
+        """Return the names of the self-hosted runners registered on a repository."""
+        response = requests.get(
+            f"https://api.github.com/repos/{repo_name}/actions/runners",
+            headers=self._api_headers(),
+            params={'per_page': 100},
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        return {runner.get('name') for runner in response.json().get('runners', [])}

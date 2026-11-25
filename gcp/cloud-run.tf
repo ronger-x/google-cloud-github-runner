@@ -37,7 +37,12 @@ module "cloud_run_github_runners_manager" {
           RUNNER_SCOPE         = var.runner_scope
         },
         # Only set when given: the app falls back to the project ID, which is not secret
-        var.setup_password == "" ? {} : { SETUP_PASSWORD = var.setup_password }
+        var.setup_password == "" ? {} : { SETUP_PASSWORD = var.setup_password },
+        # Reconcile (POST /reconcile) is off unless a token is configured
+        var.reconcile_token == "" ? {} : {
+          RECONCILE_TOKEN      = var.reconcile_token
+          ORPHAN_GRACE_SECONDS = tostring(var.orphan_grace_seconds)
+        }
       )
       env_from_key = {
         GITHUB_APP_ID = {

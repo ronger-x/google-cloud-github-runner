@@ -392,3 +392,26 @@ class TestGCloudClientDeliveryIdLogging:
         assert any(
             "gce-delerr-delivery-001" in r.message for r in caplog.records
         ), "delivery_id not found in error log on instance deletion failure"
+
+
+class TestListRunnerInstances:
+    def test_lists_runner_vms_with_repo_label(self, mock_env_vars, mock_compute_clients, mock_gcloud_auth):
+        mock_instances, _ = mock_compute_clients
+        vm = MagicMock()
+        vm.name = 'gcp-runner-abc'
+        vm.status = 'RUNNING'
+        vm.creation_timestamp = '2026-11-24T23:49:54.000-08:00'
+        vm.labels = {'gha-repo': 'rodak', 'gha-owner': 'rymcu'}
+        mock_instances.return_value.list.return_value = [vm]
+
+        result = GCloudClient().list_runner_instances()
+
+        assert result == [{
+            'name': 'gcp-runner-abc',
+            'status': 'RUNNING',
+            'created': '2026-11-24T23:49:54.000-08:00',
+            'repo': 'rodak',
+        }]
+        request = mock_instances.return_value.list.call_args.kwargs['request']
+        assert request.zone == 'us-central1-a'
+        assert 'gcp-runner-' in request.filter

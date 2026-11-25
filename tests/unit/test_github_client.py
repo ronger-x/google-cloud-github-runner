@@ -1,6 +1,6 @@
 import pytest
 import logging
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, Mock
 from app.clients.github_client import GitHubClient
 
 
@@ -201,3 +201,44 @@ class TestGitHubClientDeliveryIdLogging:
         assert any(
             "gh-org-delivery-001" in r.message for r in caplog.records
         ), "delivery_id not found in log for org registration token"
+
+
+class TestReconcileQueries:
+    @patch('app.clients.github_client.requests.get')
+    @patch.object(GitHubClient, 'get_installation_access_token', return_value='inst-token')
+    def test_list_queued_jobs_returns_only_queued_jobs(self, _token, mock_get, mock_env_vars):
+        def respond(url, **kwargs):
+            response = Mock()
+            response.raise_for_status.return_value = None
+            if url.endswith('/actions/runs'):
+                status = kwargs['params']['status']
+                runs = [{'id': 11}] if status == 'queued' else [{'id': 22}]
+                response.json.return_value = {'workflow_runs': runs}
+            elif url.endswith('/runs/11/jobs'):
+                response.json.return_value = {'jobs': [
+                    {'id': 1, 'status': 'queued', 'labels': ['gcp-rodak-linux']},
+                ]}
+            else:
+                # In-progress run: one job running, one still waiting for a runner
+                response.json.return_value = {'jobs': [
+                    {'id': 2, 'status': 'in_progress', 'labels': ['gcp-rodak-linux']},
+                    {'id': 3, 'status': 'queued', 'labels': ['gcp-rodak-linux']},
+                ]}
+            return response
+        mock_get.side_effect = respond
+
+        jobs = GitHubClient().list_queued_jobs('rymcu/rodak')
+
+        assert sorted(job['id'] for job in jobs) == [1, 3]
+        assert mock_get.call_args_list[0].kwargs['headers']['Authorization'] == 'Bearer inst-token'
+
+    @patch('app.clients.github_client.requests.get')
+    @patch.object(GitHubClient, 'get_installation_access_token', return_value='inst-token')
+    def test_list_runner_names(self, _token, mock_get, mock_env_vars):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {'runners': [{'name': 'gcp-runner-a'}, {'name': 'rodak-225'}]}
+        mock_get.return_value = response
+
+        assert GitHubClient().list_runner_names('rymcu/rodak') == {'gcp-runner-a', 'rodak-225'}
+        assert mock_get.call_args.args[0] == 'https://api.github.com/repos/rymcu/rodak/actions/runners'
