@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_ORPHAN_GRACE_SECONDS = 10 * 60
 # Booting VMs that have not registered yet are counted as covering one queued job each
 STARTING_STATUSES = {'PROVISIONING', 'STAGING', 'RUNNING'}
+# Already shutting down (usually the webhook just deleted it after the job finished): leave it alone
+GOING_AWAY_STATUSES = {'STOPPING', 'SUSPENDING'}
 
 
 def _age_seconds(created, now):
@@ -88,7 +90,7 @@ class ReconcileService:
     def _delete_orphans(self, instances, registered, now, summary):
         for instance in instances:
             name = instance['name']
-            if name in registered:
+            if name in registered or instance.get('status') in GOING_AWAY_STATUSES:
                 continue
             age = _age_seconds(instance.get('created'), now)
             if age is None or age < self.orphan_grace_seconds:

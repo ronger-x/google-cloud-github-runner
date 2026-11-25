@@ -162,3 +162,14 @@ def test_github_error_for_a_repo_is_reported_not_raised(clients):
 
     assert any('HTTP 502' in error for error in summary['errors'])
     gc.create_runner_instance.assert_not_called()
+
+
+def test_vm_already_shutting_down_is_not_deleted_again(clients):
+    """The job just finished and the webhook is deleting the VM: do not delete it a second time."""
+    gh, gc = clients
+    gc.list_runner_instances.return_value = [_vm('gcp-runner-done', minutes_ago=26, status='STOPPING')]
+
+    summary = ReconcileService().reconcile(now=NOW)
+
+    gc.delete_runner_instance.assert_not_called()
+    assert summary['deleted'] == []
