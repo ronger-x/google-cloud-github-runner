@@ -17,10 +17,9 @@ resource "google_cloud_scheduler_job" "reconcile" {
   schedule    = var.reconcile_schedule
   time_zone   = "Etc/UTC"
 
+  # No retry_config: the default is no retry (the next scheduled run is the retry), and an
+  # explicit retry_count = 0 is dropped by the API, which shows up as perpetual plan drift
   attempt_deadline = "120s"
-  retry_config {
-    retry_count = 0
-  }
 
   http_target {
     http_method = "POST"
